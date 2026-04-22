@@ -1,0 +1,45 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get version
+        id: ver
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Build
+        run: |
+          mkdir dist
+          GOOS=windows GOARCH=amd64 go build -o dist/git-remote-color.exe
+          GOOS=linux GOARCH=amd64 go build -o dist/git-remote-color-linux
+          GOOS=darwin GOARCH=amd64 go build -o dist/git-remote-color-mac
+
+      - name: Update scoop
+        run: |
+          sed -i "s/\"version\": \".*\"/\"version\": \"${{ steps.ver.outputs.VERSION }}\"/" scoop/git-remote-color.json
+
+      - name: Commit updated manifests
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add scoop/git-remote-color.json
+          git commit -m "update version ${{ steps.ver.outputs.VERSION }}" || true
+          git push || true
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*

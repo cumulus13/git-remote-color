@@ -1,0 +1,11 @@
+# PT backup directory
+.pt/
+
+# Added entries (1 items)
+*.exe
+
+# Added entries (1 items)
+plugins/
+
+# Added entries (1 items)
+*sublime*
