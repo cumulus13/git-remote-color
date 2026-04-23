@@ -2,12 +2,11 @@
 
 > A **colorized, GitHub-aware replacement for `git remote -v`** with rich metadata, smart caching, and offline support.
 
-<p align="center">
-  <img alt="Release" src="https://img.shields.io/github/v/release/cumulus13/git-remote-color?color=blue">
-  <img alt="Downloads" src="https://img.shields.io/github/downloads/cumulus13/git-remote-color/total">
-  <img alt="License" src="https://img.shields.io/github/license/cumulus13/git-remote-color">
-  <img alt="Go Version" src="https://img.shields.io/badge/go-1.20+-00ADD8?logo=go">
-</p>
+[![Release](https://img.shields.io/github/v/release/cumulus13/git-remote-color?color=blue)](https://github.com/cumulus13/git-remote-color/releases)
+[![Downloads](https://img.shields.io/github/downloads/cumulus13/git-remote-color/total)](https://github.com/cumulus13/git-remote-color/releases)
+[![License](https://img.shields.io/github/license/cumulus13/git-remote-color?color=green)](https://github.com/cumulus13/git-remote-color/blob/main/LICENSE)
+[![Go Version](https://img.shields.io/badge/go-1.20+-00ADD8?logo=go)](https://go.dev/)
+[![Build](https://img.shields.io/github/actions/workflow/status/cumulus13/git-remote-color/release.yml?label=build)](https://github.com/cumulus13/git-remote-color/actions)
 
 ---
 
