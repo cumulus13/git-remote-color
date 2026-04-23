@@ -1,11 +1,11 @@
 {
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "Colorized git remote viewer",
   "homepage": "https://github.com/cumulus13/git-remote-color",
   "license": "MIT",
   "architecture": {
     "64bit": {
-      "url": "https://github.com/cumulus13/git-remote-color/releases/download/v1.0.0/git-remote-color-windows-amd64.exe",
+      "url": "https://github.com/cumulus13/git-remote-color/releases/download/v1.0.6/git-remote-color-windows-amd64.exe",
       "bin": "git-remote-color-windows-amd64.exe"
     }
   }
