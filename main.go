@@ -28,7 +28,9 @@ type Config struct {
 	Branch      string `json:"branch"`
 	Tag         string `json:"tag"`
 	Token       string `json:"github_token"`
-	Visibility string `json:"visibility"`
+	Visibility  string `json:"visibility"`
+	LastUpdate  string `json:"last_update"`
+	LanguageColors []string `json:"language_colors"`
 }
 
 type Row struct {
@@ -48,25 +50,48 @@ type GitHubRepo struct {
 	Forks       int    `json:"forks_count"`
 	Issues      int    `json:"open_issues_count"`
 	Private     bool   `json:"private"`
+	UpdatedAt   string `json:"updated_at"`
+}
+
+type Release struct {
+	Assets []struct {
+		DownloadCount int `json:"download_count"`
+	} `json:"assets"`
 }
 
 type Branch struct{ Name string `json:"name"` }
 type Tag struct{ Name string `json:"name"` }
 
 type CacheEntry struct {
-	Repo      GitHubRepo
-	Branches  []string
-	Tags      []string
-	Languages map[string]float64
-	Time      int64
-	Cached    bool
+	Repo         GitHubRepo
+	Branches     []string
+	Tags         []string
+	Languages    map[string]float64
+	Downloads    int
+	Time         int64
+	Cached       bool
 }
+
+type HTTPError struct {
+	Status int
+}
+
 
 var (
 	httpClient = &http.Client{Timeout: 10 * time.Second}
 	cache      = map[string]CacheEntry{}
 	mu         sync.Mutex
 )
+
+var defaultLangColors = []string{
+	"#FF5555", // red
+	"#55FF55", // green
+	"#5599FF", // blue
+	"#FFFF55", // yellow
+	"#FF55FF", // magenta
+	"#55FFFF", // cyan
+	"#FFA500", // orange
+}
 
 // ---------- COLOR ----------
 func color(hex, text string) string {
@@ -78,6 +103,13 @@ func color(hex, text string) string {
 	return fmt.Sprintf("\x1b[38;2;%d;%d;%dm%s\x1b[0m", r, g, b, text)
 }
 
+func getLangColors(cfg Config) []string {
+	if len(cfg.LanguageColors) > 0 {
+		return cfg.LanguageColors
+	}
+	return defaultLangColors
+}
+
 // ---------- DEFAULT CONFIG ----------
 func defaultConfig() Config {
 	return Config{
@@ -87,6 +119,7 @@ func defaultConfig() Config {
 		Description: "#00AAFF",
 		Branch: "#FFAAFF", Tag: "#AAAA00",
 		Visibility: "#00FFFF",
+		LastUpdate: "#FFFF00",
 	}
 }
 
@@ -167,19 +200,43 @@ func parse(line string) (Row, bool) {
 	return r, false
 }
 
+
+func (e HTTPError) Error() string {
+	return fmt.Sprintf("http %d", e.Status)
+}
+
 // ---------- HTTP ----------
-func getJSON(url, token string, target interface{}) error {
+func getJSON(url, token string, target interface{}) (int, error) {
 	req, _ := http.NewRequest("GET", url, nil)
 	req.Header.Set("User-Agent", "git-remote-color")
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer resp.Body.Close()
 
+	// retry with token if rate limit
+	if resp.StatusCode == 403 && token != "" && resp.Header.Get("X-RateLimit-Remaining") == "0" {
+		req2, _ := http.NewRequest("GET", url, nil)
+		req2.Header.Set("Authorization", "Bearer "+token)
+
+		resp2, err := httpClient.Do(req2)
+		if err != nil {
+			return 0, err
+		}
+		defer resp2.Body.Close()
+
+		if resp2.StatusCode != 200 {
+			return resp2.StatusCode, fmt.Errorf("http error")
+		}
+
+		body, _ := io.ReadAll(resp2.Body)
+		return resp.StatusCode, json.Unmarshal(body, target)
+	}
+
 	if resp.StatusCode != 200 {
-		return fmt.Errorf("http %d", resp.StatusCode)
+		return resp.StatusCode, fmt.Errorf("http error")
 	}
 
 	// retry with token if rate limit
@@ -190,11 +247,19 @@ func getJSON(url, token string, target interface{}) error {
 		defer resp2.Body.Close()
 
 		body, _ := io.ReadAll(resp2.Body)
-		return json.Unmarshal(body, target)
+		return resp.StatusCode, json.Unmarshal(body, target)
 	}
 
 	body, _ := io.ReadAll(resp.Body)
-	return json.Unmarshal(body, target)
+	return resp.StatusCode, json.Unmarshal(body, target)
+}
+
+func formatDate(iso string) string {
+	t, err := time.Parse(time.RFC3339, iso)
+	if err != nil {
+		return ""
+	}
+	return t.Format("2006-01-02")
 }
 
 // ---------- FETCH ----------
@@ -212,26 +277,55 @@ func fetchAll(user, repo, token string) CacheEntry {
 
 	entry := CacheEntry{}
 
-	err := getJSON("https://api.github.com/repos/"+user+"/"+repo, token, &entry.Repo)
+	status, err := getJSON("https://api.github.com/repos/"+user+"/"+repo, token, &entry.Repo)
 
 	if err != nil {
-		// 🔥 fallback to cache
+
+		// ❌ HTTP errors (repo not exist, forbidden, etc)
+		if status != 0 {
+			msg := fmt.Sprintf("❌ repo error (HTTP %d)", status)
+
+			if status == 404 {
+				msg = "❌ repo not found"
+			} else if status == 403 {
+				msg = "🔒 access denied"
+			}
+
+			return CacheEntry{
+				Repo: GitHubRepo{
+					Description: msg,
+				},
+			}
+		}
+
+		// 🌐 network error → fallback cache
 		mu.Lock()
 		if c, ok := cache[key]; ok {
 			mu.Unlock()
-			// return c
 			c.Cached = true
 			return c
 		}
 		mu.Unlock()
 
-		// ❌ no cache + no internet
+		// ❌ offline + no cache
 		return CacheEntry{
 			Repo: GitHubRepo{
 				Description: "⚠ offline (no cache available)",
 			},
 		}
 	}
+
+	var releases []Release
+	getJSON("https://api.github.com/repos/"+user+"/"+repo+"/releases", token, &releases)
+
+	totalDownloads := 0
+	for _, r := range releases {
+		for _, a := range r.Assets {
+			totalDownloads += a.DownloadCount
+		}
+	}
+
+	entry.Downloads = totalDownloads
 
 	var branches []Branch
 	getJSON("https://api.github.com/repos/"+user+"/"+repo+"/branches", token, &branches)
@@ -380,11 +474,13 @@ func main() {
 				visibility = "🔒 private"
 			}
 
-			fmt.Printf("   %s  ⭐ %d  🍴 %d  🐞 %d\n",
+			fmt.Printf("   %s  ⭐ %d  🍴 %d  🐞 %d  ⬇ %d  🕒 %s\n",
 				color(cfg.Visibility, visibility),
 				data.Repo.Stars,
 				data.Repo.Forks,
 				data.Repo.Issues,
+				data.Downloads,
+				color(cfg.LastUpdate, formatDate(data.Repo.UpdatedAt)),
 			)
 
 			// languages
@@ -393,6 +489,30 @@ func main() {
 			// 	for lang, pct := range data.Languages {
 			// 		parts = append(parts, fmt.Sprintf("%s %.1f%%", lang, pct))
 			// 	}
+			// 	fmt.Println("   🧠", strings.Join(parts, ", "))
+			// }
+
+			// if len(data.Languages) > 0 {
+			// 	type langPair struct {
+			// 		Name string
+			// 		Pct  float64
+			// 	}
+
+			// 	var langs []langPair
+			// 	for k, v := range data.Languages {
+			// 		langs = append(langs, langPair{k, v})
+			// 	}
+
+			// 	// 🔥 sort descending
+			// 	sort.Slice(langs, func(i, j int) bool {
+			// 		return langs[i].Pct > langs[j].Pct
+			// 	})
+
+			// 	var parts []string
+			// 	for _, l := range langs {
+			// 		parts = append(parts, fmt.Sprintf("%s %.1f%%", l.Name, l.Pct))
+			// 	}
+
 			// 	fmt.Println("   🧠", strings.Join(parts, ", "))
 			// }
 
@@ -407,14 +527,18 @@ func main() {
 					langs = append(langs, langPair{k, v})
 				}
 
-				// 🔥 sort descending
 				sort.Slice(langs, func(i, j int) bool {
 					return langs[i].Pct > langs[j].Pct
 				})
 
+				colors := getLangColors(cfg)
+
 				var parts []string
-				for _, l := range langs {
-					parts = append(parts, fmt.Sprintf("%s %.1f%%", l.Name, l.Pct))
+				for i, l := range langs {
+					c := colors[i%len(colors)] // 🔥 rotate colors
+					parts = append(parts,
+						color(c, fmt.Sprintf("%s %.1f%%", l.Name, l.Pct)),
+					)
 				}
 
 				fmt.Println("   🧠", strings.Join(parts, ", "))

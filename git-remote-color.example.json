@@ -6,5 +6,16 @@
   "repo": "#FFFF00",
   "fetch": "#00AAFF",
   "push": "#AA5500",
-  "github_token": ""
+  "github_token": "",
+  "visibility": "#00FFFF",
+  "last_update": "#FFFF00",
+  "language_colors": [
+    "#FF5555",
+    "#55FF55",
+    "#5599FF",
+    "#FFFF55",
+    "#FF55FF",
+    "#55FFFF",
+    "#FFA500"
+  ]
 }
