@@ -9,37 +9,62 @@ jobs:
   release:
     runs-on: ubuntu-latest
 
+    permissions:
+      contents: write
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
       - name: Get version
         id: ver
         run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
-      - uses: actions/setup-go@v5
+      - name: Setup Go
+        uses: actions/setup-go@v5
         with:
           go-version: '1.22'
+          cache: true
 
-      - name: Build
+      - name: Build binaries
         run: |
-          mkdir dist
-          GOOS=windows GOARCH=amd64 go build -o dist/git-remote-color.exe
-          GOOS=linux GOARCH=amd64 go build -o dist/git-remote-color-linux
-          GOOS=darwin GOARCH=amd64 go build -o dist/git-remote-color-mac
+          mkdir -p dist
 
-      - name: Update scoop
+          VERSION=${{ steps.ver.outputs.VERSION }}
+
+          GOOS=windows GOARCH=amd64 go build -o dist/git-remote-color_${VERSION}_windows_amd64.exe
+          GOOS=linux   GOARCH=amd64 go build -o dist/git-remote-color_${VERSION}_linux_amd64
+          GOOS=darwin  GOARCH=amd64 go build -o dist/git-remote-color_${VERSION}_darwin_amd64
+          GOOS=darwin  GOARCH=arm64 go build -o dist/git-remote-color_${VERSION}_darwin_arm64
+
+      - name: Generate checksums
         run: |
-          sed -i "s/\"version\": \".*\"/\"version\": \"${{ steps.ver.outputs.VERSION }}\"/" scoop/git-remote-color.json
+          cd dist
+          sha256sum * > checksums.txt
 
-      - name: Commit updated manifests
+      - name: Update Scoop manifest
+        run: |
+          VERSION=${{ steps.ver.outputs.VERSION }}
+
+          sed -i "s/\"version\": \".*\"/\"version\": \"$VERSION\"/" scoop/git-remote-color.json
+
+          # update hash (windows binary)
+          HASH=$(sha256sum dist/git-remote-color_${VERSION}_windows_amd64.exe | awk '{print $1}')
+          sed -i "s/\"hash\": \".*\"/\"hash\": \"$HASH\"/" scoop/git-remote-color.json
+
+      - name: Commit Scoop update
         run: |
           git config user.name "github-actions"
           git config user.email "actions@github.com"
           git add scoop/git-remote-color.json
-          git commit -m "update version ${{ steps.ver.outputs.VERSION }}" || true
-          git push || true
+          git commit -m "update scoop manifest ${{ steps.ver.outputs.VERSION }}" || echo "no changes"
+          git push
 
-      - name: Release
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/*
+          name: v${{ steps.ver.outputs.VERSION }}
+          tag_name: ${{ github.ref }}
+          generate_release_notes: true
+          files: |
+            dist/*

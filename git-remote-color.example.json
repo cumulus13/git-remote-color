@@ -1,0 +1,10 @@
+{
+  "remote": "#00FFFF",
+  "scheme": "#FFAAFF",
+  "host": "#55AA00",
+  "path": "#AAAAFF",
+  "repo": "#FFFF00",
+  "fetch": "#00AAFF",
+  "push": "#AA5500",
+  "github_token": ""
+}
