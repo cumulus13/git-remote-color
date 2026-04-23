@@ -58,7 +58,7 @@ jobs:
           git config user.email "actions@github.com"
           git add scoop/git-remote-color.json
           git commit -m "update scoop manifest ${{ steps.ver.outputs.VERSION }}" || echo "no changes"
-          git push
+          git push origin HEAD:master
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
