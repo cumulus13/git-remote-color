@@ -8,28 +8,29 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"time"
-	"sort"
 )
 
 type LangMap map[string]int
 
 type Config struct {
-	Remote      string `json:"remote"`
-	Scheme      string `json:"scheme"`
-	Host        string `json:"host"`
-	Path        string `json:"path"`
-	Repo        string `json:"repo"`
-	Fetch       string `json:"fetch"`
-	Push        string `json:"push"`
-	Description string `json:"description"`
-	Branch      string `json:"branch"`
-	Tag         string `json:"tag"`
-	Token       string `json:"github_token"`
-	Visibility  string `json:"visibility"`
-	LastUpdate  string `json:"last_update"`
+	Remote         string   `json:"remote"`
+	Scheme         string   `json:"scheme"`
+	Host           string   `json:"host"`
+	Path           string   `json:"path"`
+	Repo           string   `json:"repo"`
+	Fetch          string   `json:"fetch"`
+	Push           string   `json:"push"`
+	Description    string   `json:"description"`
+	Branch         string   `json:"branch"`
+	Tag            string   `json:"tag"`
+	Token          string   `json:"github_token"`
+	Visibility     string   `json:"visibility"`
+	LastUpdate     string   `json:"last_update"`
 	LanguageColors []string `json:"language_colors"`
 }
 
@@ -59,23 +60,26 @@ type Release struct {
 	} `json:"assets"`
 }
 
-type Branch struct{ Name string `json:"name"` }
-type Tag struct{ Name string `json:"name"` }
+type Branch struct {
+	Name string `json:"name"`
+}
+type Tag struct {
+	Name string `json:"name"`
+}
 
 type CacheEntry struct {
-	Repo         GitHubRepo
-	Branches     []string
-	Tags         []string
-	Languages    map[string]float64
-	Downloads    int
-	Time         int64
-	Cached       bool
+	Repo      GitHubRepo
+	Branches  []string
+	Tags      []string
+	Languages map[string]float64
+	Downloads int
+	Time      int64
+	Cached    bool
 }
 
 type HTTPError struct {
 	Status int
 }
-
 
 var (
 	httpClient = &http.Client{Timeout: 10 * time.Second}
@@ -117,25 +121,100 @@ func defaultConfig() Config {
 		Path: "#AAAAFF", Repo: "#FFFF00",
 		Fetch: "#00AAFF", Push: "#AA5500",
 		Description: "#00AAFF",
-		Branch: "#FFAAFF", Tag: "#AAAA00",
+		Branch:      "#FFAAFF", Tag: "#AAAA00",
 		Visibility: "#00FFFF",
 		LastUpdate: "#FFFF00",
 	}
 }
 
 // ---------- LOAD CONFIG ----------
+func uniqueStrings(values []string) []string {
+	seen := map[string]bool{}
+	var out []string
+	for _, value := range values {
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		out = append(out, value)
+	}
+	return out
+}
+
+func configCandidates() []string {
+	exe, _ := os.Executable()
+	exeBase := strings.TrimSuffix(filepath.Base(exe), filepath.Ext(exe))
+	exeDir := filepath.Dir(exe)
+
+	names := uniqueStrings([]string{
+		exeBase + ".json",
+		"gitv.json",
+		"giti.json",
+		"git-remote-color.json",
+		".gitv.json",
+		".giti.json",
+		".git-remote-color.json",
+	})
+
+	var candidates []string
+
+	if env := strings.TrimSpace(os.Getenv("GIT_REMOTE_COLOR_CONFIG")); env != "" {
+		candidates = append(candidates, env)
+	}
+
+	for _, name := range names {
+		candidates = append(candidates, filepath.Join(exeDir, name))
+	}
+
+	if cwd, err := os.Getwd(); err == nil {
+		for _, name := range names {
+			candidates = append(candidates, filepath.Join(cwd, name))
+		}
+	}
+
+	if configDir, err := os.UserConfigDir(); err == nil {
+		for _, name := range names {
+			candidates = append(candidates,
+				filepath.Join(configDir, "git-remote-color", name),
+				filepath.Join(configDir, exeBase, name),
+				filepath.Join(configDir, name),
+			)
+		}
+	}
+
+	if home, err := os.UserHomeDir(); err == nil {
+		for _, name := range names {
+			candidates = append(candidates, filepath.Join(home, name))
+		}
+	}
+
+	if runtime.GOOS != "windows" {
+		if xdg := strings.TrimSpace(os.Getenv("XDG_CONFIG_HOME")); xdg != "" {
+			for _, name := range names {
+				candidates = append(candidates,
+					filepath.Join(xdg, "git-remote-color", name),
+					filepath.Join(xdg, exeBase, name),
+				)
+			}
+		}
+	}
+
+	return uniqueStrings(candidates)
+}
+
 func loadConfig() Config {
 	cfg := defaultConfig()
 
-	exe, _ := os.Executable()
-	path := strings.TrimSuffix(exe, filepath.Ext(exe)) + ".json"
+	for _, path := range configCandidates() {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
 
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return cfg
+		_ = json.Unmarshal(data, &cfg)
+		break
 	}
 
-	_ = json.Unmarshal(data, &cfg)
 	return cfg
 }
 
@@ -200,7 +279,6 @@ func parse(line string) (Row, bool) {
 	return r, false
 }
 
-
 func (e HTTPError) Error() string {
 	return fmt.Sprintf("http %d", e.Status)
 }
@@ -209,6 +287,10 @@ func (e HTTPError) Error() string {
 func getJSON(url, token string, target interface{}) (int, error) {
 	req, _ := http.NewRequest("GET", url, nil)
 	req.Header.Set("User-Agent", "git-remote-color")
+	req.Header.Set("Accept", "application/vnd.github+json")
+	if token = strings.TrimSpace(token); token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
@@ -216,38 +298,8 @@ func getJSON(url, token string, target interface{}) (int, error) {
 	}
 	defer resp.Body.Close()
 
-	// retry with token if rate limit
-	if resp.StatusCode == 403 && token != "" && resp.Header.Get("X-RateLimit-Remaining") == "0" {
-		req2, _ := http.NewRequest("GET", url, nil)
-		req2.Header.Set("Authorization", "Bearer "+token)
-
-		resp2, err := httpClient.Do(req2)
-		if err != nil {
-			return 0, err
-		}
-		defer resp2.Body.Close()
-
-		if resp2.StatusCode != 200 {
-			return resp2.StatusCode, fmt.Errorf("http error")
-		}
-
-		body, _ := io.ReadAll(resp2.Body)
-		return resp.StatusCode, json.Unmarshal(body, target)
-	}
-
 	if resp.StatusCode != 200 {
-		return resp.StatusCode, fmt.Errorf("http error")
-	}
-
-	// retry with token if rate limit
-	if resp.Header.Get("X-RateLimit-Remaining") == "0" && token != "" {
-		req2, _ := http.NewRequest("GET", url, nil)
-		req2.Header.Set("Authorization", "Bearer "+token)
-		resp2, _ := httpClient.Do(req2)
-		defer resp2.Body.Close()
-
-		body, _ := io.ReadAll(resp2.Body)
-		return resp.StatusCode, json.Unmarshal(body, target)
+		return resp.StatusCode, HTTPError{Status: resp.StatusCode}
 	}
 
 	body, _ := io.ReadAll(resp.Body)
@@ -289,6 +341,8 @@ func fetchAll(user, repo, token string) CacheEntry {
 				msg = "❌ repo not found"
 			} else if status == 403 {
 				msg = "🔒 access denied"
+			} else if status == 401 {
+				msg = "🔑 invalid github token"
 			}
 
 			return CacheEntry{

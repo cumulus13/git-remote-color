@@ -167,6 +167,17 @@ Auto-created config:
 }
 ```
 
+Config lookup order now includes:
+
+* `GIT_REMOTE_COLOR_CONFIG`
+* executable-side config like `gitv.json` / `git-remote-color.json`
+* current working directory
+* platform config directory
+  * Windows: `%AppData%`
+  * Linux: `$XDG_CONFIG_HOME` or `~/.config`
+  * macOS: `~/Library/Application Support`
+* home-directory dotfiles like `.gitv.json`
+
 ---
 
 ## 🎨 Color Fields
