@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/charmbracelet/glamour"
 )
 
 type LangMap map[string]int
@@ -32,6 +35,9 @@ type Config struct {
 	Visibility     string   `json:"visibility"`
 	LastUpdate     string   `json:"last_update"`
 	LanguageColors []string `json:"language_colors"`
+	ReadmeColor    string   `json:"readme_color"`
+	GlamourStyle   string   `json:"glamour_style"`
+	GlamourWidth   int      `json:"glamour_width"`
 }
 
 type Row struct {
@@ -45,13 +51,14 @@ type Row struct {
 }
 
 type GitHubRepo struct {
-	Description string `json:"description"`
-	Language    string `json:"language"`
-	Stars       int    `json:"stargazers_count"`
-	Forks       int    `json:"forks_count"`
-	Issues      int    `json:"open_issues_count"`
-	Private     bool   `json:"private"`
-	UpdatedAt   string `json:"updated_at"`
+	Description   string `json:"description"`
+	Language      string `json:"language"`
+	Stars         int    `json:"stargazers_count"`
+	Forks         int    `json:"forks_count"`
+	Issues        int    `json:"open_issues_count"`
+	Private       bool   `json:"private"`
+	UpdatedAt     string `json:"updated_at"`
+	DefaultBranch string `json:"default_branch"`
 }
 
 type Release struct {
@@ -79,6 +86,19 @@ type CacheEntry struct {
 
 type HTTPError struct {
 	Status int
+}
+
+type ReadmeInfo struct {
+	Name     string `json:"name"`
+	Content  string `json:"content"`
+	Encoding string `json:"encoding"`
+}
+
+type Args struct {
+	Dir        string
+	Detail     bool
+	Help       bool
+	FullOutput bool // -f flag: disable pager, output directly
 }
 
 var (
@@ -114,6 +134,70 @@ func getLangColors(cfg Config) []string {
 	return defaultLangColors
 }
 
+// ---------- HELP ----------
+func printHelp() {
+	cfg := defaultConfig()
+	
+	help := `
+` + color("#FF6B6B", "🔧 git-remote-color") + ` - Beautiful Git Remote Information
+
+` + color("#FFE66D", "USAGE:") + `
+  git-remote-color [OPTIONS] [DIRECTORY]
+
+` + color("#4ECDC4", "ARGUMENTS:") + `
+  DIRECTORY               ` + color("#888888", "(optional)") + `  Path to git repository
+                          Can be:
+                          • ` + color(cfg.Remote, ".") + `                Current directory (default)
+                          • ` + color(cfg.Remote, "relative/path") + `    Relative path
+                          • ` + color(cfg.Remote, "/absolute/path") + `   Absolute path
+                          • ` + color(cfg.Remote, "~") + `               Home directory
+                          • ` + color(cfg.Remote, "..") + `              Parent directory
+
+` + color("#4ECDC4", "FLAGS:") + `
+  ` + color(cfg.Description, "-d, --detail") + `    Show README from remote repository (uses pager)
+  ` + color(cfg.Description, "-r, --readme") + `    Same as --detail
+  ` + color(cfg.Description, "-f, --full") + `      Disable pager, print all output directly
+  ` + color(cfg.Description, "-h, --help") + `      Show this help message
+
+` + color("#95E1D3", "EXAMPLES:") + `
+  # Show info for current directory
+  ` + color(cfg.Repo, "git-remote-color") + `
+
+  # Show info with README (pager mode for long content)
+  ` + color(cfg.Repo, "git-remote-color -d") + `
+
+  # Show info with full README output (no pager)
+  ` + color(cfg.Repo, "git-remote-color -d -f") + `
+
+  # Pipe the output to a file
+  ` + color(cfg.Repo, "git-remote-color -df > output.txt") + `
+
+  # Show info for specific repo with README
+  ` + color(cfg.Repo, "git-remote-color --detail /path/to/repo") + `
+
+` + color("#F38181", "PAGER BEHAVIOR:") + `
+  By default, long README content opens in a pager (less -R).
+  • Use ` + color(cfg.Tag, "↑/↓") + ` or ` + color(cfg.Tag, "j/k") + ` to scroll
+  • Press ` + color(cfg.Tag, "q") + ` to quit the pager
+  • Use ` + color(cfg.Tag, "-f") + ` to print directly without pager
+  • Pager preserves all colors and formatting ✨
+
+` + color("#FEDE5D", "CONFIGURATION:") + `
+  Config file is auto-detected from:
+  • Current directory
+  • Executable directory
+  • User config directory (~/.config/git-remote-color/)
+  • Home directory
+  
+  Supported names: ` + color(cfg.Tag, "gitv.json, giti.json, git-remote-color.json") + `
+
+` + color("#FEDE5D", "ENVIRONMENT:") + `
+  GIT_REMOTE_COLOR_CONFIG    Path to custom config file
+  GITHUB_TOKEN               GitHub API token (use in config file's "github_token" field)
+`
+	fmt.Println(help)
+}
+
 // ---------- DEFAULT CONFIG ----------
 func defaultConfig() Config {
 	return Config{
@@ -122,9 +206,49 @@ func defaultConfig() Config {
 		Fetch: "#00AAFF", Push: "#AA5500",
 		Description: "#00AAFF",
 		Branch:      "#FFAAFF", Tag: "#AAAA00",
-		Visibility: "#00FFFF",
-		LastUpdate: "#FFFF00",
+		Visibility:  "#00FFFF",
+		LastUpdate:  "#FFFF00",
+		ReadmeColor: "#95E1D3",
+		GlamourStyle: "auto",
+		GlamourWidth: 100,
 	}
+}
+
+// ---------- PARSE ARGUMENTS ----------
+func parseArgs() Args {
+	args := Args{
+		Dir:        ".",
+		Detail:     false,
+		Help:       false,
+		FullOutput: false,
+	}
+	
+	foundDir := false
+	
+	for i := 1; i < len(os.Args); i++ {
+		arg := os.Args[i]
+		
+		switch {
+		case arg == "-h" || arg == "--help":
+			args.Help = true
+			return args
+			
+		case arg == "-d" || arg == "--detail" || arg == "-r" || arg == "--readme":
+			args.Detail = true
+			
+		case arg == "-f" || arg == "--full":
+			args.FullOutput = true
+			
+		default:
+			// Accept any non-flag argument as directory path
+			if !strings.HasPrefix(arg, "-") && !foundDir {
+				args.Dir = arg
+				foundDir = true
+			}
+		}
+	}
+	
+	return args
 }
 
 // ---------- LOAD CONFIG ----------
@@ -314,6 +438,147 @@ func formatDate(iso string) string {
 	return t.Format("2006-01-02")
 }
 
+// ---------- FETCH README ----------
+func fetchReadme(user, repo, token string) *ReadmeInfo {
+	url := fmt.Sprintf("https://api.github.com/repos/%s/%s/readme", user, repo)
+	
+	var readme ReadmeInfo
+	status, err := getJSON(url, token, &readme)
+	
+	if err != nil || status != 200 {
+		return nil
+	}
+	
+	return &readme
+}
+
+func decodeBase64(s string) (string, error) {
+	// Remove newlines and whitespace from base64 content
+	s = strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\r' || r == ' ' {
+			return -1
+		}
+		return r
+	}, s)
+	
+	decoded, err := base64.StdEncoding.DecodeString(s)
+	if err != nil {
+		return "", err
+	}
+	
+	return string(decoded), nil
+}
+
+// ---------- PAGER ----------
+func showInPager(content string) {
+	// Try less first (most common), fallback to more
+	pager := os.Getenv("PAGER")
+	if pager == "" {
+		pager = "less"
+	}
+	
+	cmd := exec.Command(pager, "-R") // -R preserves ANSI color codes
+	cmd.Stdin = strings.NewReader(content)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	
+	if err := cmd.Run(); err != nil {
+		// Fallback: try more if less not available
+		if pager == "less" {
+			cmd = exec.Command("more")
+			cmd.Stdin = strings.NewReader(content)
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			
+			if err := cmd.Run(); err != nil {
+				// Last resort: just print it
+				fmt.Print(content)
+			}
+		} else {
+			// Custom pager failed, print directly
+			fmt.Print(content)
+		}
+	}
+}
+
+// ---------- SHOW README ----------
+func showReadme(user, repo string, cfg Config, fullOutput bool) {
+	fmt.Println("\n" + color("#FF6B6B", "═══ README ═══"))
+	readme := fetchReadme(user, repo, cfg.Token)
+	
+	if readme != nil {
+		fmt.Println("   " + color(cfg.ReadmeColor, "📄 "+readme.Name))
+		fmt.Println("   " + color("#888888", strings.Repeat("─", 60)))
+		fmt.Println()
+		
+		if readme.Encoding == "base64" {
+			decoded, err := decodeBase64(readme.Content)
+			if err == nil {
+				// Configure glamour renderer
+				width := cfg.GlamourWidth
+				if width == 0 {
+					width = 100
+				}
+				
+				style := cfg.GlamourStyle
+				if style == "" {
+					style = "auto"
+				}
+				
+				var renderer *glamour.TermRenderer
+				if style == "auto" {
+					renderer, err = glamour.NewTermRenderer(
+						glamour.WithAutoStyle(),
+						glamour.WithWordWrap(width),
+					)
+				} else {
+					renderer, err = glamour.NewTermRenderer(
+						glamour.WithStandardStyle(style),
+						glamour.WithWordWrap(width),
+					)
+				}
+				
+				if err != nil {
+					fmt.Println("   " + color("#FF5555", "⚠ Could not create renderer"))
+					return
+				}
+				
+				rendered, err := renderer.Render(decoded)
+				if err != nil {
+					fmt.Println("   " + color("#FF5555", "⚠ Could not render README"))
+					return
+				}
+				
+				// Check content length
+				lines := strings.Split(rendered, "\n")
+				
+				if fullOutput || len(lines) <= 50 {
+					// Print directly (either forced with -f or short content)
+					fmt.Print(rendered)
+				} else {
+					// Use pager for long content
+					fmt.Println(color("#888888", "   📖 Opening in pager (use -f for direct output, q to quit)"))
+					showInPager(rendered)
+				}
+			} else {
+				fmt.Println("   " + color("#FF5555", "⚠ Could not decode README"))
+			}
+		} else {
+			// Non-base64 content (unlikely, but handle it)
+			lines := strings.Split(readme.Content, "\n")
+			if fullOutput || len(lines) <= 50 {
+				fmt.Print(readme.Content)
+			} else {
+				fmt.Println(color("#888888", "   📖 Opening in pager (use -f for direct output, q to quit)"))
+				showInPager(readme.Content)
+			}
+		}
+	} else {
+		fmt.Println("   " + color("#FFE66D", "⚠ No README found in this repository"))
+		fmt.Println("   " + color("#888888", "  The repository might exist but doesn't have a README file"))
+	}
+}
+
 // ---------- FETCH ----------
 func fetchAll(user, repo, token string) CacheEntry {
 	key := user + "/" + repo
@@ -321,7 +586,6 @@ func fetchAll(user, repo, token string) CacheEntry {
 	mu.Lock()
 	if c, ok := cache[key]; ok && time.Now().Unix()-c.Time < 3600 {
 		mu.Unlock()
-		// return c
 		c.Cached = true
 		return c
 	}
@@ -332,8 +596,6 @@ func fetchAll(user, repo, token string) CacheEntry {
 	status, err := getJSON("https://api.github.com/repos/"+user+"/"+repo, token, &entry.Repo)
 
 	if err != nil {
-
-		// ❌ HTTP errors (repo not exist, forbidden, etc)
 		if status != 0 {
 			msg := fmt.Sprintf("❌ repo error (HTTP %d)", status)
 
@@ -352,7 +614,6 @@ func fetchAll(user, repo, token string) CacheEntry {
 			}
 		}
 
-		// 🌐 network error → fallback cache
 		mu.Lock()
 		if c, ok := cache[key]; ok {
 			mu.Unlock()
@@ -361,7 +622,6 @@ func fetchAll(user, repo, token string) CacheEntry {
 		}
 		mu.Unlock()
 
-		// ❌ offline + no cache
 		return CacheEntry{
 			Repo: GitHubRepo{
 				Description: "⚠ offline (no cache available)",
@@ -398,17 +658,6 @@ func fetchAll(user, repo, token string) CacheEntry {
 	var langRaw LangMap
 	getJSON("https://api.github.com/repos/"+user+"/"+repo+"/languages", token, &langRaw)
 
-	// total := 0
-	// for _, v := range langRaw {
-	// 	total += v
-	// }
-
-	// entry.Languages = map[string]float64{}
-
-	// for k, v := range langRaw {
-	// 	entry.Languages[k] = (float64(v) / float64(total)) * 100
-	// }
-
 	total := 0
 	for _, v := range langRaw {
 		total += v
@@ -431,38 +680,48 @@ func fetchAll(user, repo, token string) CacheEntry {
 
 // ---------- MAIN ----------
 func main() {
+	args := parseArgs()
+	
+	if args.Help {
+		printHelp()
+		return
+	}
+	
 	cfg := loadConfig()
 
-	// -------- PATH SUPPORT (FIXED) --------
-	dir := "."
-	for i, a := range os.Args {
-		if i == 0 {
-			continue
-		}
-		if !strings.HasPrefix(a, "-") {
-			dir = a
-			break
+	// Handle home directory expansion
+	dir := args.Dir
+	if strings.HasPrefix(dir, "~") {
+		home, err := os.UserHomeDir()
+		if err == nil {
+			dir = filepath.Join(home, dir[1:])
 		}
 	}
 
 	absDir, err := filepath.Abs(dir)
 	if err != nil {
-		fmt.Println("Invalid path:", dir)
+		fmt.Println(color("#FF5555", "❌ Error:"), "Invalid path:", dir)
 		return
 	}
 
 	root, err := findGitRoot(absDir)
 	if err != nil {
-		fmt.Println("Not a git repository:", absDir)
+		fmt.Println(color("#FF5555", "❌"), "Not a git repository:", absDir)
+		fmt.Println(color("#888888", "   Tip: Run 'git init' or navigate to a git repository"))
 		return
 	}
 
+	// Show which repo we're looking at if not current directory
+	if dir != "." {
+		fmt.Println(color("#888888", "📂 Repository:"), color(cfg.Path, root))
+	}
+
 	cmd := exec.Command("git", "remote", "-v")
-	cmd.Dir = root // 🔥 THIS FIXES YOUR BUG
+	cmd.Dir = root
 
 	out, err := cmd.Output()
 	if err != nil {
-		fmt.Println("Error:", err)
+		fmt.Println(color("#FF5555", "❌ Error:"), err)
 		return
 	}
 
@@ -479,6 +738,12 @@ func main() {
 		}
 
 		group[r.URL] = append(group[r.URL], r)
+	}
+
+	if len(group) == 0 {
+		fmt.Println(color("#FFE66D", "⚠ No remote repositories configured"))
+		fmt.Println(color("#888888", "   Add a remote with: git remote add origin <url>"))
+		return
 	}
 
 	for _, rows := range group {
@@ -508,14 +773,20 @@ func main() {
 		if r.Host == "github.com" {
 			data := fetchAll(r.User, r.Repo, cfg.Token)
 
-			// ✅ cached indicator (NOW valid)
 			if data.Cached {
 				fmt.Println("   " + color("#888888", "(cached)"))
 			}
 
-			// ✅ offline handling
 			if data.Repo.Description == "⚠ offline (no cache available)" {
 				fmt.Println("   " + color("#FF5555", "⚠ offline (no cached data)"))
+				continue
+			}
+
+			// Handle error states
+			if strings.HasPrefix(data.Repo.Description, "❌") || 
+			   strings.HasPrefix(data.Repo.Description, "🔒") || 
+			   strings.HasPrefix(data.Repo.Description, "🔑") {
+				fmt.Println("   " + color("#FF5555", data.Repo.Description))
 				continue
 			}
 
@@ -537,39 +808,7 @@ func main() {
 				color(cfg.LastUpdate, formatDate(data.Repo.UpdatedAt)),
 			)
 
-			// languages
-			// if len(data.Languages) > 0 {
-			// 	var parts []string
-			// 	for lang, pct := range data.Languages {
-			// 		parts = append(parts, fmt.Sprintf("%s %.1f%%", lang, pct))
-			// 	}
-			// 	fmt.Println("   🧠", strings.Join(parts, ", "))
-			// }
-
-			// if len(data.Languages) > 0 {
-			// 	type langPair struct {
-			// 		Name string
-			// 		Pct  float64
-			// 	}
-
-			// 	var langs []langPair
-			// 	for k, v := range data.Languages {
-			// 		langs = append(langs, langPair{k, v})
-			// 	}
-
-			// 	// 🔥 sort descending
-			// 	sort.Slice(langs, func(i, j int) bool {
-			// 		return langs[i].Pct > langs[j].Pct
-			// 	})
-
-			// 	var parts []string
-			// 	for _, l := range langs {
-			// 		parts = append(parts, fmt.Sprintf("%s %.1f%%", l.Name, l.Pct))
-			// 	}
-
-			// 	fmt.Println("   🧠", strings.Join(parts, ", "))
-			// }
-
+			// Languages
 			if len(data.Languages) > 0 {
 				type langPair struct {
 					Name string
@@ -589,7 +828,7 @@ func main() {
 
 				var parts []string
 				for i, l := range langs {
-					c := colors[i%len(colors)] // 🔥 rotate colors
+					c := colors[i%len(colors)]
 					parts = append(parts,
 						color(c, fmt.Sprintf("%s %.1f%%", l.Name, l.Pct)),
 					)
@@ -598,20 +837,29 @@ func main() {
 				fmt.Println("   🧠", strings.Join(parts, ", "))
 			}
 
-			// branches
+			// Branches
 			if len(data.Branches) > 0 {
 				fmt.Println("   🌿 branches:")
 				for _, b := range data.Branches {
-					fmt.Println("     -", color(cfg.Branch, b))
+					marker := ""
+					if b == data.Repo.DefaultBranch {
+						marker = color("#FFD700", " ★")
+					}
+					fmt.Println("     -", color(cfg.Branch, b)+marker)
 				}
 			}
 
-			// tags
+			// Tags
 			if len(data.Tags) > 0 {
 				fmt.Println("   🏷️ tags:")
 				for _, t := range data.Tags {
 					fmt.Println("     -", color(cfg.Tag, t))
 				}
+			}
+			
+			// Show README if requested
+			if args.Detail {
+				showReadme(r.User, r.Repo, cfg, args.FullOutput)
 			}
 		}
 	}
