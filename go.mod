@@ -1,6 +1,6 @@
 module github.com/cumulus13/git-remote-color
 
-go 1.25.3
+go 1.25.0
 
 require github.com/charmbracelet/glamour v1.0.0
 

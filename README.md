@@ -1,11 +1,11 @@
 # git-remote-color
 
-> A **colorized, GitHub-aware replacement for `git remote -v`** with rich metadata, README preview with Glow-like rendering, smart caching, and offline support.
+> A **colorized, GitHub-aware replacement for `git remote -v`** with rich metadata, GitHub Actions workflow status, README preview, smart caching, offline support, and repo lookup by name.
 
 [![Release](https://img.shields.io/github/v/release/cumulus13/git-remote-color?color=blue)](https://github.com/cumulus13/git-remote-color/releases)
 [![Downloads](https://img.shields.io/github/downloads/cumulus13/git-remote-color/total)](https://github.com/cumulus13/git-remote-color/releases)
 [![License](https://img.shields.io/github/license/cumulus13/git-remote-color?color=green)](https://github.com/cumulus13/git-remote-color/blob/main/LICENSE)
-[![Go Version](https://img.shields.io/badge/go-1.20+-00ADD8?logo=go)](https://go.dev/)
+[![Go Version](https://img.shields.io/badge/go-1.22+-00ADD8?logo=go)](https://go.dev/)
 [![Build](https://img.shields.io/github/actions/workflow/status/cumulus13/git-remote-color/release.yml?label=build)](https://github.com/cumulus13/git-remote-color/actions)
 
 ---
@@ -13,168 +13,84 @@
 ## ✨ Features
 
 ### 🎨 Rich Colored Output
+- Truecolor ANSI (24-bit) with short `#RGB` support
+- Fully configurable via JSON
+- Clean, structured CLI layout
 
-* Truecolor ANSI (24-bit)
-* Fully configurable via JSON
-* Clean, structured CLI layout
+### ⚙️ GitHub Actions Workflow Status (NEW)
+- View the latest workflow run per workflow with `-w` / `--workflows`
+- Status icons: ✔ success, ✘ failure, ⟳ in_progress, ⊘ cancelled, ⏱ timed_out, and more
+- Shows workflow name, branch, event trigger, and relative time ("3h ago")
+- Compact inline CI summary even without `-w` (shows latest run in main view)
 
----
+### 🔎 Repo Lookup by Name (NEW)
+- Pass `owner/repo` or just `repo` (with `owner` set in config) to fetch info without a local clone
+- Example: `git-remote-color myrepo` → resolves to `yourname/myrepo` via `"owner"` in config
 
-### 📖 README Preview (NEW)
+### 📖 README Preview
+- Fetch and display remote README with `-d` / `--detail` / `-r` / `--readme`
+- **Glow-like rendering** powered by [Glamour](https://github.com/charmbracelet/glamour)
+- Syntax highlighting, styled tables, and proper markdown formatting
+- Smart pager integration; use `-f` to bypass
 
-* Fetch and display remote README with `-d` / `--detail` / `-r` / `--readme`
-* **Glow-like rendering** powered by [Glamour](https://github.com/charmbracelet/glamour)
-* Syntax highlighting, styled tables, and proper markdown formatting
-* Smart pager integration for long content
-* Control output with `-f` / `--full` flag
-
-#### Pager Behavior:
 | Content Length | Default Behavior | With `-f` Flag |
 |---------------|------------------|----------------|
 | ≤ 50 lines    | Direct output    | Direct output  |
 | > 50 lines    | Opens in pager   | Direct output  |
 
----
-
-### 🔗 Git Smart Integration
-
-* Works like `git remote -v`
-* Supports:
-  * current directory
-  * subdirectories inside repo
-  * relative path
-  * absolute path
-  * home directory (`~`)
-* Automatically detects Git root
-
----
-
 ### 🌐 GitHub Deep Info
+- 📝 Description
+- 🌍 Public / 🔒 Private
+- ⭐ Stars / 🍴 Forks / 🐞 Issues / ⬇ Downloads
+- 🧠 Languages with percentage (sorted, color-coded)
+- 🌿 Branch list (with ★ default branch marker)
+- 🏷️ Tag list
+- ⚙️ Workflow status
 
-For GitHub repositories:
+### ⚡ Smart Cache
+- In-memory cache (1 hour TTL) with RW-mutex for goroutine safety
+- `--no-cache` to force a fresh fetch
+- Graceful offline fallback to stale cache
 
-* 📝 Description
-* 🌍 Public / 🔒 Private
-* ⭐ Stars / 🍴 Forks / 🐞 Issues / ⬇ Downloads
-* 🧠 **Languages with percentage (sorted, color-coded)**
-* 🌿 Branch list (with ★ default branch marker)
-* 🏷️ Tag list
-* 📄 README preview (optional)
-
----
-
-### 🧠 Language Breakdown (Improved)
-
-Instead of a single language:
-
-```text
-🧠 JavaScript 82.4%, HTML 12.1%, CSS 5.5%
-```
-
-* Sorted by usage (descending)
-* Based on GitHub language API
-* Accurate percentage calculation
-* Each language gets a unique color from configurable palette
-
----
-
-### ⚡ Smart Cache System
-
-* Automatic in-memory cache (1 hour TTL)
-* Prevents duplicate API calls
-* Faster repeated runs
-
-#### Cache behavior:
-
-| Scenario  | Behavior               |
-| --------- | ---------------------- |
-| First run | Fetch from GitHub      |
-| Next runs | Use cache (shows cached indicator) |
-| Offline   | Use cache if available |
-
----
-
-### 📡 Offline Support
-
-When internet is unavailable:
-
-#### ✔ With cache:
-
-```text
-(cached)
-🌍 public ⭐ 10 🍴 2 🐞 1 ⬇ 1500 🕒 2024-01-15
-```
-
-#### ❌ Without cache:
-
-```text
-⚠ offline (no cached data)
-```
-
-👉 No fake data is shown.
-
----
-
-### 🧠 Smart Token Handling
-
-Optional GitHub token:
-
-```json
-{
-  "github_token": "ghp_xxxxx"
-}
-```
-
-Behavior:
-
-| Case         | Behavior              |
-| ------------ | --------------------- |
-| Public repo  | Works without token   |
-| Private repo | Requires token        |
-| Rate limit   | Token increases limit |
+### 🔗 Git Integration
+- Works from any subdirectory (walks up to Git root)
+- Supports: `.`, `../path`, `/absolute/path`, `~/path`, `owner/repo`, `reponame`
+- Parallel API calls (releases, branches, tags, languages, workflows fetched concurrently)
 
 ---
 
 ## 🚀 Usage
 
-### Basic Usage
 ```bash
 # Current directory
 git-remote-color
 
-# Relative path
-git-remote-color ../project
-
-# Absolute path
-git-remote-color /home/user/projects/repo
-
-# Home directory
-git-remote-color ~/code/myproject
-```
-
-### README Preview
-```bash
-# Show README with pager for long content
+# With README (pager for long content)
 git-remote-color -d
 
-# Show README with full output (no pager)
-git-remote-color -d -f
+# With workflow status
+git-remote-color -w
 
-# Alternative flags
-git-remote-color --detail
-git-remote-color --readme
+# Full combo: README + workflows, no pager
+git-remote-color -dfw
 
-# Combine with path
-git-remote-color -d ../other-project
+# Lookup a repo directly (owner set in config)
+git-remote-color myrepo
 
-# Pipe to file (use -f to avoid pager)
-git-remote-color -df > output.txt
-```
+# Lookup with explicit owner/repo
+git-remote-color cumulus13/git-remote-color
 
-### Help
-```bash
-git-remote-color -h
-git-remote-color --help
+# Specific path
+git-remote-color /path/to/repo -d
+
+# Pipe to file
+git-remote-color -dfw > report.txt
+
+# Bypass cache
+git-remote-color --no-cache -w
+
+# Version
+git-remote-color -v
 ```
 
 ---
@@ -182,54 +98,37 @@ git-remote-color --help
 ## 🎯 Example Output
 
 ### Basic Output
-```text
-origin  https://github.com/user/repo (fetch, push)
+```
+origin  https://github.com/user/repo  (fetch, push)
    A powerful CLI tool
    🌍 public  ⭐ 42  🍴 10  🐞 3  ⬇ 2500  🕒 2024-01-15
-   🧠 Go 70.0%, Shell 20.0%, Makefile 10.0%
+   🧠 Go 70.0%  Shell 20.0%  Makefile 10.0%
+   ⚙ CI: ✔ success  Release [main]
 
    🌿 branches:
      - main ★
      - dev
 
-   🏷️ tags:
+   🏷️  tags:
      - v1.0
      - v1.1
 ```
 
-### With README (-d flag)
-```text
-origin  https://github.com/user/repo (fetch, push)
-   A powerful CLI tool
-   🌍 public  ⭐ 42  🍴 10  🐞 3  ⬇ 2500  🕒 2024-01-15
-   🧠 Go 70.0%, Shell 20.0%, Makefile 10.0%
+### With Workflows (-w)
+```
+═══ GitHub Actions ═══
+   📋 3 total run(s), showing last 3
 
-   🌿 branches:
-     - main ★
-     - dev
-
-════ README ═══
-   📄 README.md
-   ────────────────────────────────────────────────────────────
-
-   # Project Title
-   
-   A beautiful README rendered with Glamour...
-   
-   ## Installation
-   
-   ```bash
-   go install github.com/user/repo@latest
-   ```
-   
-   ... (opens in pager for long content)
+   ✔ success   Release [main] (push)  2h ago
+   ✔ success   CI [dev] (push)  1d ago
+   ⊘ cancelled  Nightly [main] (schedule)  3d ago
 ```
 
 ---
 
 ## ⚙️ Configuration
 
-Auto-detected config file (JSON):
+Place a `gitv.json` (or `git-remote-color.json`) in one of the auto-detected locations.
 
 ```json
 {
@@ -246,65 +145,40 @@ Auto-detected config file (JSON):
   "visibility": "#00FFFF",
   "last_update": "#FFFF00",
   "readme_color": "#95E1D3",
+  "workflow_color": "#C3E88D",
   "github_token": "",
+  "owner": "yourname",
   "glamour_style": "auto",
   "glamour_width": 100,
   "language_colors": [
-    "#FF5555",
-    "#55FF55",
-    "#5599FF",
-    "#FFFF55",
-    "#FF55FF",
-    "#55FFFF",
-    "#FFA500"
+    "#FF5555", "#55FF55", "#5599FF",
+    "#FFFF55", "#FF55FF", "#55FFFF", "#FFA500"
   ]
 }
 ```
 
-### New Configuration Options
+### New Fields in v1.1
 
-| Field | Description | Default |
-|-------|-------------|---------|
-| `glamour_style` | README rendering style | `"auto"` |
-| `glamour_width` | Word wrap width for README | `100` |
-| `readme_color` | Color for README title | `"#95E1D3"` |
-| `language_colors` | Custom language color palette | Rainbow array |
-
-#### Glamour Styles
-- `auto` - Auto-detect based on terminal background
-- `light` - Light theme
-- `dark` - Dark theme
-- `notty` - No TTY style (plain)
+| Field            | Description                                      | Default        |
+|------------------|--------------------------------------------------|----------------|
+| `workflow_color` | Color for workflow names                         | `"#C3E88D"`    |
+| `owner`          | Default GitHub owner for bare repo name lookups  | `""`           |
 
 Config lookup order:
-* `GIT_REMOTE_COLOR_CONFIG` environment variable
-* Executable-side config (`gitv.json`, `git-remote-color.json`)
-* Current working directory
-* Platform config directory
-  * Windows: `%AppData%`
-  * Linux: `$XDG_CONFIG_HOME` or `~/.config`
-  * macOS: `~/Library/Application Support`
-* Home directory dotfiles (`.gitv.json`, `.git-remote-color.json`)
+1. `$GIT_REMOTE_COLOR_CONFIG` env var
+2. Executable directory
+3. Current working directory
+4. Platform config dir (`%AppData%` / `~/.config` / `~/Library/Application Support`)
+5. Home directory (dotfile variants)
 
----
+### GitHub Token
+Set `github_token` in config, or export `GITHUB_TOKEN` in your shell.
 
-## 🎨 Color Fields
-
-| Field          | Description          |
-| -------------- | -------------------- |
-| remote         | Remote name          |
-| scheme         | Protocol             |
-| host           | Domain               |
-| path           | Username/org         |
-| repo           | Repo name            |
-| fetch          | fetch label          |
-| push           | push label           |
-| description    | repo description     |
-| branch         | branch names         |
-| tag            | tag names            |
-| visibility     | public/private label |
-| last_update    | last update date     |
-| readme_color   | README title color   |
+| Case         | Behavior              |
+|-------------|----------------------|
+| Public repo  | Works without token   |
+| Private repo | Requires token        |
+| Rate limit   | Token increases to 5000 req/hr |
 
 ---
 
@@ -316,64 +190,92 @@ go install github.com/cumulus13/git-remote-color@latest
 ```
 
 ### From Releases
-Download the latest binary from [Releases](https://github.com/cumulus13/git-remote-color/releases) page.
+Download the latest binary from [Releases](https://github.com/cumulus13/git-remote-color/releases).
 
-Available for:
-- Linux (amd64, arm64)
-- macOS (amd64, arm64)
-- Windows (amd64)
+| Platform | Binary Name |
+|----------|-------------|
+| Linux x64 | `git-remote-color_*_linux_amd64` |
+| Linux ARM64 | `git-remote-color_*_linux_arm64` |
+| Linux ARMv7 (RPi 3/4, Termux) | `git-remote-color_*_linux_armv7` |
+| Linux ARMv6 (RPi Zero/1) | `git-remote-color_*_linux_armv6` |
+| Android ARM64 (Termux) | `git-remote-color_*_android_arm64_termux` |
+| Android ARMv7 (Termux) | `git-remote-color_*_android_armv7_termux` |
+| macOS Intel | `git-remote-color_*_darwin_amd64` |
+| macOS Apple Silicon | `git-remote-color_*_darwin_arm64` |
+| Windows x64 | `git-remote-color_*_windows_amd64.exe` |
+| Windows ARM64 | `git-remote-color_*_windows_arm64.exe` |
+| FreeBSD x64 | `git-remote-color_*_freebsd_amd64` |
+
+### Termux (Android)
+```bash
+# ARM64 device (most modern Android phones)
+curl -L https://github.com/cumulus13/git-remote-color/releases/latest/download/git-remote-color_latest_android_arm64_termux \
+  -o $PREFIX/bin/git-remote-color
+chmod +x $PREFIX/bin/git-remote-color
+
+# ARMv7 device
+curl -L https://github.com/cumulus13/git-remote-color/releases/latest/download/git-remote-color_latest_android_armv7_termux \
+  -o $PREFIX/bin/git-remote-color
+chmod +x $PREFIX/bin/git-remote-color
+```
+
+### Homebrew (macOS/Linux)
+```bash
+brew install cumulus13/tap/git-remote-color
+```
+
+### Scoop (Windows)
+```powershell
+scoop bucket add cumulus13 https://github.com/cumulus13/scoop-bucket
+scoop install git-remote-color
+```
 
 ---
 
-## 🔧 Dependencies
+## 🔧 Flags Reference
 
-- [Glamour](https://github.com/charmbracelet/glamour) - Markdown rendering
-- Go 1.20+
+| Flag | Aliases | Description |
+|------|---------|-------------|
+| `-d` | `--detail`, `-r`, `--readme` | Show README |
+| `-w` | `--workflows` | Show GitHub Actions workflow runs |
+| `-f` | `--full` | Disable pager, print directly |
+| `--no-cache` | | Bypass in-memory cache |
+| `-v` | `--version` | Show version |
+| `-h` | `--help` | Show help |
 
----
-
-## ⚠️ Notes
-
-* GitHub API used for metadata
-* Without token → 60 req/hour
-* With token → 5000 req/hour
-* Private repos require token
-* README fetch is a separate API call
-* Pager respects `$PAGER` environment variable
-
----
-
-## ❌ Non-GitHub Repos
-
-* Still shown (colored)
-* No metadata or README fetched
-* Works with any Git remote
+Flags can be combined: `-dw`, `-df`, `-dfw`.
 
 ---
 
 ## 🧠 Behavior Summary
 
-| Scenario             | Result         |
-| -------------------- | -------------- |
-| Same fetch/push      | grouped        |
-| Different fetch/push | both shown     |
-| Multiple remotes     | all shown      |
-| Subfolder            | works          |
-| Offline              | cache fallback |
-| No cache + offline   | warning        |
-| README > 50 lines    | opens in pager |
-| README + `-f` flag   | direct output  |
-| No README            | friendly msg   |
+| Scenario              | Result                          |
+|----------------------|---------------------------------|
+| Same fetch/push       | Grouped as one remote           |
+| Different fetch/push  | Both shown                      |
+| Multiple remotes      | All shown                       |
+| Subdirectory          | Walks up to Git root            |
+| Bare name `myrepo`    | Resolved via config `owner`     |
+| `owner/repo` slug     | Direct GitHub lookup (no clone) |
+| Offline + cache       | Stale cache shown               |
+| Offline, no cache     | Warning shown                   |
+| Rate limited          | Informative error + hint        |
+| README > 50 lines     | Opens in pager                  |
+| README + `-f`         | Direct output                   |
+| Workflow runs         | Deduplicated per workflow name  |
+| Non-GitHub remote     | Shown colored, no metadata      |
+| Windows               | Uses `more.com` as pager        |
 
 ---
 
 ## 🗺️ Roadmap
 
-- [ ] Support for GitLab, Bitbucket APIs
-- [ ] Config file generator command
-- [ ] Shell completion scripts
+- [ ] GitLab and Bitbucket API support
+- [ ] Config generator command (`git-remote-color --init-config`)
+- [ ] Shell completion scripts (bash, zsh, fish)
 - [ ] Multiple output formats (JSON, YAML)
 - [ ] Watch mode for live updates
+- [ ] Pull request summary
 
 ---
 
@@ -384,11 +286,11 @@ MIT
 ---
 
 ## 👤 Author
-        
+
 [Hadi Cahyadi](mailto:cumulus13@gmail.com)
 
 [![Buy Me a Coffee](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://www.buymeacoffee.com/cumulus13)
 
 [![Donate via Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/cumulus13)
- 
+
 [Support me on Patreon](https://www.patreon.com/cumulus13)
