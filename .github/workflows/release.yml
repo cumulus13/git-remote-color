@@ -127,7 +127,7 @@ jobs:
           ARM64_HASH=$(sha256sum "dist/git-remote-color_${VERSION}_darwin_arm64" | awk '{print $1}')
           python3 - <<'PY'
           import os, re
-          path = "homebrew/git-remote-color.rb"
+          path = "Formula/git-remote-color.rb"
           ver = os.environ["VERSION"]
           amd64 = os.environ.get("AMD64_HASH","")
           arm64 = os.environ.get("ARM64_HASH","")
@@ -147,7 +147,7 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add scoop/git-remote-color.json homebrew/git-remote-color.rb 2>/dev/null || true
+          git add scoop/git-remote-color.json Formula/git-remote-color.rb 2>/dev/null || true
           git diff --cached --quiet || git commit -m "chore: update manifests for v${VERSION} [skip ci]"
           git push origin HEAD:master || true
 
