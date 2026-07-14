@@ -139,6 +139,8 @@ type Args struct {
 	Version    bool
 	Workflows  bool
 	NoCache    bool
+	Command    string // "config"
+	Subcommand string // "show" or "path"
 }
 
 // ─── Globals ──────────────────────────────────────────────────────────────────
@@ -225,6 +227,10 @@ func printHelp() {
   ` + color(cfg.Description, "-v, --version") + `   Show version
   ` + color(cfg.Description, "-h, --help") + `      Show this help message
 
+` + color("#FEDE5D", "config:") + `
+  config show             Show the active, parsed JSON configuration
+  config path             List all config file search locations (active files highlighted)
+
 ` + color("#95E1D3", "EXAMPLES:") + `
   ` + color(cfg.Repo, "git-remote-color") + `                     Info for current dir
   ` + color(cfg.Repo, "git-remote-color -d") + `                  Info + README (pager)
@@ -280,14 +286,33 @@ func parseArgs() Args {
 	args := Args{Dir: "."}
 	foundDir := false
 
+	// Check for "config" command first
+	if len(os.Args) > 1 && os.Args[1] == "config" {
+		args.Command = "config"
+		if len(os.Args) > 2 {
+			switch os.Args[2] {
+			case "show":
+				args.Subcommand = "show"
+				return args
+			case "path":
+				args.Subcommand = "path"
+				return args
+			default:
+				args.Help = true
+				return args
+			}
+		}
+		args.Help = true
+		return args
+	}
+
+	// Standard flag parsing
 	for i := 1; i < len(os.Args); i++ {
 		arg := os.Args[i]
 
-		// Support combined short flags: -dw, -df, -dfw, etc.
 		if len(arg) > 2 && arg[0] == '-' && arg[1] != '-' {
 			expanded := expandCombinedFlags(arg[1:])
 			os.Args = append(os.Args[:i], append(expanded, os.Args[i+1:]...)...)
-			// Re-process current index
 			i--
 			continue
 		}
@@ -431,6 +456,11 @@ func loadConfig() Config {
 	// Fallback: GITHUB_TOKEN env var (config file takes precedence)
 	if cfg.Token == "" {
 		cfg.Token = strings.TrimSpace(os.Getenv("GITHUB_TOKEN"))
+	}
+
+	// Force environment variables to take absolute priority over config files
+	if envToken := strings.TrimSpace(os.Getenv("GITHUB_TOKEN")); envToken != "" {
+	    cfg.Token = envToken
 	}
 
 	return cfg
@@ -1306,6 +1336,33 @@ func main() {
 	}
 
 	cfg := loadConfig()
+
+	// Route "config show" and "config path"
+	if args.Command == "config" {
+		if args.Subcommand == "path" {
+			fmt.Println(color("#4ECDC4", "🔎 Configuration search paths (ordered by priority):"))
+			candidates := configCandidates()
+			for _, path := range candidates {
+				if _, err := os.Stat(path); err == nil {
+					fmt.Printf("  %s %s\n", color("#55FF55", "✔ [ACTIVE]"), path)
+				} else {
+					fmt.Printf("             %s\n", color("#888888", path))
+				}
+			}
+			return
+		}
+
+		if args.Subcommand == "show" {
+			pretty, err := json.MarshalIndent(cfg, "", "  ")
+			if err != nil {
+				fmt.Println(color("#FF5555", "❌ Error formatting configuration:"), err)
+				os.Exit(1)
+			}
+			fmt.Println(color("#FFAAFF", "📝 Active Configuration State:"))
+			fmt.Println(string(pretty))
+			return
+		}
+	}
 
 	// Check if the argument looks like a GitHub slug before treating it as a path
 	if user, repo, ok := resolveRepoArg(args.Dir, cfg); ok {

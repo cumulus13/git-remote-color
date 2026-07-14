@@ -20,10 +20,12 @@ giti.json
 gitignore_backup/
 
 # Added entries (1 items)
-git-remote-color.json
 
 # Added entries (1 items)
 gitv.json
 
 # Added entries (1 items)
 *.1
+
+# Added entries (1 items)
+git-remote-color.json

@@ -1,23 +1,23 @@
 {
-  "version": "1.1.0",
+  "version": "1.0.12",
   "description": "Colorized, GitHub-aware replacement for git remote -v",
   "homepage": "https://github.com/cumulus13/git-remote-color",
   "license": "MIT",
   "architecture": {
     "64bit": {
-      "url": "https://github.com/cumulus13/git-remote-color/releases/download/v1.1.0/git-remote-color_1.1.0_windows_amd64.exe",
+      "url": "https://github.com/cumulus13/git-remote-color/releases/download/v1.0.12/git-remote-color_1.0.12_windows_amd64.exe",
       "hash": "PUT_REAL_SHA256_HERE",
-      "bin": [["git-remote-color_1.1.0_windows_amd64.exe", "git-remote-color"]]
+      "bin": [["git-remote-color_1.0.12_windows_amd64.exe", "git-remote-color"]]
     },
     "32bit": {
-      "url": "https://github.com/cumulus13/git-remote-color/releases/download/v1.1.0/git-remote-color_1.1.0_windows_386.exe",
+      "url": "https://github.com/cumulus13/git-remote-color/releases/download/v1.0.12/git-remote-color_1.0.12_windows_386.exe",
       "hash": "PUT_REAL_SHA256_HERE",
-      "bin": [["git-remote-color_1.1.0_windows_386.exe", "git-remote-color"]]
+      "bin": [["git-remote-color_1.0.12_windows_386.exe", "git-remote-color"]]
     },
     "arm64": {
-      "url": "https://github.com/cumulus13/git-remote-color/releases/download/v1.1.0/git-remote-color_1.1.0_windows_arm64.exe",
+      "url": "https://github.com/cumulus13/git-remote-color/releases/download/v1.0.12/git-remote-color_1.0.12_windows_arm64.exe",
       "hash": "PUT_REAL_SHA256_HERE",
-      "bin": [["git-remote-color_1.1.0_windows_arm64.exe", "git-remote-color"]]
+      "bin": [["git-remote-color_1.0.12_windows_arm64.exe", "git-remote-color"]]
     }
   },
   "checkver": {
@@ -35,5 +35,7 @@
         "url": "https://github.com/cumulus13/git-remote-color/releases/download/v$version/git-remote-color_$version_windows_arm64.exe"
       }
     }
-  }
+  },
+  "url": "https://github.com/cumulus13/git-remote-color/releases/download/v1.0.12/git-remote-color_1.0.12_windows_amd64.exe",
+  "hash": ""
 }
