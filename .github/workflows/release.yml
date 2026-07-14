@@ -106,7 +106,7 @@ jobs:
           HASH=$(sha256sum "dist/git-remote-color_${VERSION}_windows_amd64.exe" | awk '{print $1}')
           python3 - <<'PY'
           import json, os, sys
-          path = "scoop/git-remote-color.json"
+          path = "scoop/gitv-scoop.json"
           with open(path) as f:
               m = json.load(f)
           m["version"] = os.environ["VERSION"]
@@ -147,7 +147,7 @@ jobs:
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add scoop/git-remote-color.json Formula/git-remote-color.rb 2>/dev/null || true
+          git add scoop/gitv-scoop.json Formula/git-remote-color.rb 2>/dev/null || true
           git diff --cached --quiet || git commit -m "chore: update manifests for v${VERSION} [skip ci]"
           git push origin HEAD:master || true
 
