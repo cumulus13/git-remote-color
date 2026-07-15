@@ -440,11 +440,16 @@ func configCandidates() []string {
 func loadConfig() Config {
 	cfg := defaultConfig()
 
+	// fmt.Printf("cfg: %v\n", cfg)
+
 	for _, path := range configCandidates() {
 		data, err := os.ReadFile(path)
 		if err != nil {
 			continue
 		}
+		
+		fmt.Printf("Config File: %s\n", path)
+
 		// Merge: only override non-zero values so defaults survive partial configs
 		var partial Config
 		if err := json.Unmarshal(data, &partial); err == nil {
@@ -453,15 +458,15 @@ func loadConfig() Config {
 		break
 	}
 
-	// Fallback: GITHUB_TOKEN env var (config file takes precedence)
 	if cfg.Token == "" {
-		cfg.Token = strings.TrimSpace(os.Getenv("GITHUB_TOKEN"))
+			// Fallback: GITHUB_TOKEN env var (config file takes precedence)
+			cfg.Token = strings.TrimSpace(os.Getenv("GITHUB_TOKEN"))
 	}
 
 	// Force environment variables to take absolute priority over config files
-	if envToken := strings.TrimSpace(os.Getenv("GITHUB_TOKEN")); envToken != "" {
+	if envToken := strings.TrimSpace(os.Getenv("GITHUB_TOKEN")); envToken != "" && cfg.Token == ""  {
 	    cfg.Token = envToken
-	}
+	} 
 
 	return cfg
 }
