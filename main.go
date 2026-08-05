@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -145,6 +147,27 @@ type Args struct {
 
 // ─── Globals ──────────────────────────────────────────────────────────────────
 
+// fallbackResolver bypasses /etc/resolv.conf entirely and queries a public
+// DNS server directly. This fixes false "offline" reports on platforms where
+// CGO_ENABLED=0 (pure-Go DNS resolver) can't read resolv.conf — notably
+// Termux/NetHunter Android chroots, where the system network stack (used by
+// curl/ping via Android's own resolver) works fine but Go's pure resolver
+// fails silently on a missing or unreachable resolv.conf.
+var fallbackResolver = &net.Resolver{
+	PreferGo: true,
+	Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+		d := net.Dialer{Timeout: 5 * time.Second}
+		// Try a couple of public resolvers in case one is blocked/unreachable.
+		for _, server := range []string{"8.8.8.8:53", "1.1.1.1:53"} {
+			conn, err := d.DialContext(ctx, "udp", server)
+			if err == nil {
+				return conn, nil
+			}
+		}
+		return d.DialContext(ctx, "udp", "8.8.8.8:53")
+	},
+}
+
 var (
 	httpClient = &http.Client{
 		Timeout: 15 * time.Second,
@@ -153,6 +176,10 @@ var (
 			IdleConnTimeout:     30 * time.Second,
 			DisableCompression:  false,
 			TLSHandshakeTimeout: 10 * time.Second,
+			DialContext: (&net.Dialer{
+				Timeout:  10 * time.Second,
+				Resolver: fallbackResolver,
+			}).DialContext,
 		},
 	}
 	cache   = map[string]CacheEntry{}
@@ -447,7 +474,7 @@ func loadConfig() Config {
 		if err != nil {
 			continue
 		}
-		
+
 		fmt.Printf("Config File: %s\n", path)
 
 		// Merge: only override non-zero values so defaults survive partial configs
@@ -459,14 +486,14 @@ func loadConfig() Config {
 	}
 
 	if cfg.Token == "" {
-			// Fallback: GITHUB_TOKEN env var (config file takes precedence)
-			cfg.Token = strings.TrimSpace(os.Getenv("GITHUB_TOKEN"))
+		// Fallback: GITHUB_TOKEN env var (config file takes precedence)
+		cfg.Token = strings.TrimSpace(os.Getenv("GITHUB_TOKEN"))
 	}
 
 	// Force environment variables to take absolute priority over config files
-	if envToken := strings.TrimSpace(os.Getenv("GITHUB_TOKEN")); envToken != "" && cfg.Token == ""  {
-	    cfg.Token = envToken
-	} 
+	if envToken := strings.TrimSpace(os.Getenv("GITHUB_TOKEN")); envToken != "" && cfg.Token == "" {
+		cfg.Token = envToken
+	}
 
 	return cfg
 }
@@ -1084,7 +1111,12 @@ func fetchAll(ctx context.Context, user, repo, token string, noCache bool) Cache
 			return c
 		}
 		cacheMu.RUnlock()
-		return CacheEntry{Repo: GitHubRepo{Description: "⚠ offline (no cached data)"}}
+		msg := "⚠ offline (no cached data)"
+		var dnsErr *net.DNSError
+		if errors.As(err, &dnsErr) {
+			msg = "⚠ DNS lookup failed for api.github.com (no cached data)"
+		}
+		return CacheEntry{Repo: GitHubRepo{Description: msg}}
 	}
 
 	// Parallel fetch of supplementary data
