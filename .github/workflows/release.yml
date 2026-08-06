@@ -84,6 +84,16 @@ jobs:
           build linux arm64 "" "" android_arm64_termux
           build linux arm   7 "" android_armv7_termux
 
+          # ── Stable "latest" aliases ──────────────────────────────────────
+          # README instructs users to download a literal "_latest_" filename
+          # via GitHub's /releases/latest/download/ URL. That URL only works
+          # if a file with that exact name exists in the release assets, so
+          # publish an alias copy alongside each versioned Termux binary.
+          cp "dist/git-remote-color_${VERSION}_android_arm64_termux" \
+             "dist/git-remote-color_latest_android_arm64_termux"
+          cp "dist/git-remote-color_${VERSION}_android_armv7_termux" \
+             "dist/git-remote-color_latest_android_armv7_termux"
+
           # ── OpenBSD / NetBSD ───────────────────────────────────────────
           build openbsd  amd64 "" "" openbsd_amd64
           build netbsd   amd64 "" "" netbsd_amd64
