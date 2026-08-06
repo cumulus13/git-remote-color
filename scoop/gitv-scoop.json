@@ -1,5 +1,5 @@
 {
-  "version": "1.0.15",
+  "version": "1.0.17",
   "description": "Colorized, GitHub-aware replacement for git remote -v",
   "homepage": "https://github.com/cumulus13/git-remote-color",
   "license": "MIT",
@@ -51,6 +51,6 @@
       }
     }
   },
-  "url": "https://github.com/cumulus13/git-remote-color/releases/download/v1.0.15/git-remote-color_1.0.15_windows_amd64.exe",
+  "url": "https://github.com/cumulus13/git-remote-color/releases/download/v1.0.17/git-remote-color_1.0.17_windows_amd64.exe",
   "hash": ""
 }
