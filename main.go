@@ -214,6 +214,21 @@ func color(hex, text string) string {
 	return fmt.Sprintf("\x1b[38;2;%d;%d;%dm%s\x1b[0m", r, g, b, text)
 }
 
+// maskToken redacts a secret for display, keeping a few chars on each end so
+// the user can still recognize *which* token is configured without exposing
+// it (e.g. in `config show`, screenshots, or terminal scrollback/logs).
+func maskToken(token string) string {
+	token = strings.TrimSpace(token)
+	if token == "" {
+		return ""
+	}
+	const keep = 4
+	if len(token) <= keep*2 {
+		return strings.Repeat("*", len(token))
+	}
+	return token[:keep] + strings.Repeat("*", len(token)-keep*2) + token[len(token)-keep:]
+}
+
 func getLangColors(cfg Config) []string {
 	if len(cfg.LanguageColors) > 0 {
 		return cfg.LanguageColors
@@ -742,6 +757,45 @@ func parse(line string) (Row, bool) {
 
 // ─── HTTP ─────────────────────────────────────────────────────────────────────
 
+// curlFallbackGET shells out to the system `curl` binary. It exists for
+// chrooted/proot environments (Termux, Kali NetHunter) where Go's own
+// dialer/TLS stack can fail to reach the network even though the OS's own
+// resolver+socket path — the one `curl`/`ping` use — works fine. This is the
+// same class of problem fallbackResolver already works around for DNS, but
+// one layer down at the socket/TLS level, where a Go-level fix isn't possible.
+func curlFallbackGET(ctx context.Context, url, token string) (status int, body []byte, err error) {
+	curlPath, err := exec.LookPath("curl")
+	if err != nil {
+		return 0, nil, err
+	}
+
+	args := []string{
+		"-s", "-S",
+		"--max-time", "15",
+		"-H", "User-Agent: git-remote-color/" + Version,
+		"-H", "Accept: application/vnd.github+json",
+		"-H", "X-GitHub-Api-Version: 2022-11-28",
+		"-w", "\n%{http_code}",
+	}
+	if t := strings.TrimSpace(token); t != "" {
+		args = append(args, "-H", "Authorization: Bearer "+t)
+	}
+	args = append(args, url)
+
+	out, err := exec.CommandContext(ctx, curlPath, args...).Output()
+	if err != nil {
+		return 0, nil, fmt.Errorf("curl fallback: %w", err)
+	}
+
+	trimmed := strings.TrimRight(string(out), "\n")
+	idx := strings.LastIndexByte(trimmed, '\n')
+	if idx < 0 {
+		return 0, nil, fmt.Errorf("curl fallback: unexpected output")
+	}
+	fmt.Sscanf(trimmed[idx+1:], "%d", &status)
+	return status, []byte(trimmed[:idx]), nil
+}
+
 func getJSON(ctx context.Context, url, token string, target interface{}) (int, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -756,6 +810,22 @@ func getJSON(ctx context.Context, url, token string, target interface{}) (int, e
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
+		// Go's own network stack failed — try the system curl binary before
+		// giving up. In some proot chroots (Termux, Kali NetHunter) this
+		// succeeds even when Go's dialer cannot reach the network at all.
+		if status, body, curlErr := curlFallbackGET(ctx, url, token); curlErr == nil {
+			if status != http.StatusOK {
+				var ghErr struct {
+					Message string `json:"message"`
+				}
+				_ = json.Unmarshal(body, &ghErr)
+				return status, HTTPError{Status: status, Message: ghErr.Message}
+			}
+			if jsonErr := json.Unmarshal(body, target); jsonErr != nil {
+				return status, fmt.Errorf("decode JSON: %w", jsonErr)
+			}
+			return status, nil
+		}
 		return 0, err
 	}
 	defer resp.Body.Close()
@@ -1111,7 +1181,7 @@ func fetchAll(ctx context.Context, user, repo, token string, noCache bool) Cache
 			return c
 		}
 		cacheMu.RUnlock()
-		msg := "⚠ offline (no cached data)"
+		msg := fmt.Sprintf("⚠ offline (no cached data): %v", err)
 		var dnsErr *net.DNSError
 		if errors.As(err, &dnsErr) {
 			msg = "⚠ DNS lookup failed for api.github.com (no cached data)"
@@ -1390,13 +1460,18 @@ func main() {
 		}
 
 		if args.Subcommand == "show" {
-			pretty, err := json.MarshalIndent(cfg, "", "  ")
+			display := cfg
+			display.Token = maskToken(display.Token)
+			pretty, err := json.MarshalIndent(display, "", "  ")
 			if err != nil {
 				fmt.Println(color("#FF5555", "❌ Error formatting configuration:"), err)
 				os.Exit(1)
 			}
 			fmt.Println(color("#FFAAFF", "📝 Active Configuration State:"))
 			fmt.Println(string(pretty))
+			if cfg.Token != "" {
+				fmt.Println(color("#888888", "   (github_token is masked in this output)"))
+			}
 			return
 		}
 	}
