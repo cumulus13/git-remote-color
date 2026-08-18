@@ -32,3 +32,6 @@ git-remote-color.json
 
 # Added entries (1 items)
 *.orig
+
+# Added entries (1 items)
+*.patch

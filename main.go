@@ -141,6 +141,7 @@ type Args struct {
 	Version    bool
 	Workflows  bool
 	NoCache    bool
+	Copy       bool
 	Command    string // "config"
 	Subcommand string // "show" or "path"
 }
@@ -267,6 +268,7 @@ func printHelp() {
   ` + color(cfg.Description, "-f, --full") + `      Disable pager, print all output directly
   ` + color(cfg.Description, "--no-cache") + `      Bypass in-memory cache
   ` + color(cfg.Description, "-v, --version") + `   Show version
+  ` + color(cfg.Description, "-c, --copy") + `      Copy primary remote URL to clipboard
   ` + color(cfg.Description, "-h, --help") + `      Show this help message
 
 ` + color("#FEDE5D", "config:") + `
@@ -279,6 +281,7 @@ func printHelp() {
   ` + color(cfg.Repo, "git-remote-color -d -f") + `               Info + README (no pager)
   ` + color(cfg.Repo, "git-remote-color -w") + `                  Info + workflow status
   ` + color(cfg.Repo, "git-remote-color -dw") + `                 Info + README + workflows
+  ` + color(cfg.Repo, "git-remote-color -c") + `                  Info + copy URL to clipboard
   ` + color(cfg.Repo, "git-remote-color myrepo") + `              Resolve via config owner
   ` + color(cfg.Repo, "git-remote-color owner/repo") + `          Direct slug lookup
   ` + color(cfg.Repo, "git-remote-color -d ../other") + `         Specific path + README
@@ -374,6 +377,8 @@ func parseArgs() Args {
 			args.FullOutput = true
 		case "--no-cache":
 			args.NoCache = true
+		case "-c", "--copy":
+			args.Copy = true
 		default:
 			if !strings.HasPrefix(arg, "-") && !foundDir {
 				args.Dir = arg
@@ -384,10 +389,10 @@ func parseArgs() Args {
 	return args
 }
 
-// expandCombinedFlags turns "dfw" → ["-d", "-f", "-w"]
+// expandCombinedFlags turns "dfwc" → ["-d", "-f", "-w", "-c"]
 func expandCombinedFlags(flags string) []string {
 	known := map[byte]string{
-		'd': "-d", 'r': "-r", 'f': "-f",
+		'd': "-d", 'r': "-r", 'f': "-f", 'c': "-c",
 		'w': "-w", 'h': "-h", 'v': "-v",
 	}
 	var out []string
@@ -501,7 +506,7 @@ func loadConfig() Config {
 	}
 
 	if cfg.Token == "" {
-		// Fallback: GITHUB_TOKEN env var (config file takes precedence)
+		// Fallback: GITHUB_TOKEN env var (config file takes priority)
 		cfg.Token = strings.TrimSpace(os.Getenv("GITHUB_TOKEN"))
 	}
 
@@ -873,6 +878,39 @@ func formatRelative(iso string) string {
 	default:
 		return t.Format("2006-01-02")
 	}
+}
+
+// ─── Clipboard ───────────────────────────────────────────────────────────────
+
+func copyToClipboard(text string) error {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "windows":
+		cmd = exec.Command("clip")
+	case "darwin":
+		cmd = exec.Command("pbcopy")
+	default:
+		if _, err := exec.LookPath("wl-copy"); err == nil {
+			cmd = exec.Command("wl-copy")
+		} else if _, err := exec.LookPath("xclip"); err == nil {
+			cmd = exec.Command("xclip", "-selection", "clipboard")
+		} else if _, err := exec.LookPath("termux-clipboard-set"); err == nil {
+			cmd = exec.Command("termux-clipboard-set")
+		} else {
+			return fmt.Errorf("no clipboard utility found (install xclip or wl-copy)")
+		}
+	}
+
+	in, err := cmd.StdinPipe()
+	if err != nil {
+		return err
+	}
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	_, _ = io.WriteString(in, text)
+	in.Close()
+	return cmd.Wait()
 }
 
 // ─── README ───────────────────────────────────────────────────────────────────
@@ -1310,6 +1348,14 @@ func printRemoteInfo(rows []Row, cfg Config, args Args) {
 		line += "  (" + strings.Join(types, ", ") + ")"
 	}
 	fmt.Println(line)
+
+	if args.Copy && r.URL != "" {
+		if err := copyToClipboard(r.URL); err == nil {
+			fmt.Println("   " + color("#55FF55", "📋 Copied URL to clipboard: ") + color(cfg.Remote, r.URL))
+		} else {
+			fmt.Println("   " + color("#FF5555", "❌ Clipboard copy failed: ") + err.Error())
+		}
+	}
 
 	if r.Host != "github.com" {
 		return
