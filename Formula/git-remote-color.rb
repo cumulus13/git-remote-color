@@ -1,7 +1,7 @@
 class GitRemoteColor < Formula
   desc "Colorized, GitHub-aware replacement for git remote -v with rich metadata"
   homepage "https://github.com/cumulus13/git-remote-color"
-  version "1.0.21"
+  version "1.0.22"
   license "MIT"
 
   on_macos do
