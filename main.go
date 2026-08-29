@@ -50,6 +50,53 @@ type Config struct {
 	WorkflowColor  string   `json:"workflow_color"`
 	// Owner used to resolve bare repo names (e.g. "myrepo" → owner/myrepo)
 	Owner string `json:"owner"`
+	// Tokens maps a GitHub username/org (case-insensitive) to the token used
+	// only for that user's/org's repositories. This lets a single config
+	// authenticate as multiple GitHub accounts (e.g. a personal account plus
+	// one or more orgs you also contribute to). When a repo's owner has no
+	// matching entry here, resolution falls back to Token / GITHUB_TOKEN.
+	// Example: {"cumulus13": "ghp_xxx", "licface": "ghp_yyy"}
+	Tokens map[string]string `json:"tokens"`
+}
+
+// TokenFor resolves the GitHub token to use for a given repo owner/user.
+//
+// Resolution order (highest priority first):
+//  1. Per-user token in the config "tokens" map (case-insensitive key match)
+//  2. Per-user environment variable GITHUB_TOKEN_<SANITIZED_USER>
+//  3. Global token: config "github_token", or GITHUB_TOKEN env as fallback
+//     (already folded into cfg.Token by loadConfig)
+func (cfg Config) TokenFor(user string) string {
+	user = strings.TrimSpace(user)
+	if user != "" {
+		for k, v := range cfg.Tokens {
+			if strings.EqualFold(strings.TrimSpace(k), user) {
+				if t := strings.TrimSpace(v); t != "" {
+					return t
+				}
+			}
+		}
+		envKey := "GITHUB_TOKEN_" + sanitizeEnvKey(user)
+		if t := strings.TrimSpace(os.Getenv(envKey)); t != "" {
+			return t
+		}
+	}
+	return cfg.Token
+}
+
+// sanitizeEnvKey uppercases a GitHub username/org and replaces any character
+// that isn't A-Z, 0-9, or underscore with underscore, so it's safe to use as
+// an environment variable name suffix (e.g. "my-org" → "MY_ORG").
+func sanitizeEnvKey(s string) string {
+	var b strings.Builder
+	for _, r := range strings.ToUpper(s) {
+		if (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '_' {
+			b.WriteRune(r)
+		} else {
+			b.WriteRune('_')
+		}
+	}
+	return b.String()
 }
 
 type Row struct {
@@ -297,7 +344,14 @@ func printHelp() {
 
 ` + color("#FEDE5D", "ENVIRONMENT:") + `
   GIT_REMOTE_COLOR_CONFIG    Path to custom config file
-  GITHUB_TOKEN               Fallback GitHub token (config file takes priority)
+  GITHUB_TOKEN               Fallback global GitHub token (config file takes priority)
+  GITHUB_TOKEN_<USER>        Fallback token for a specific owner, e.g. GITHUB_TOKEN_LICFACE
+
+` + color("#FEDE5D", "MULTI-ACCOUNT TOKENS:") + `
+  Configure per-owner tokens in "tokens" so each remote authenticates as the
+  right GitHub account, e.g.:
+    "tokens": { "cumulus13": "ghp_xxx", "licface": "ghp_yyy" }
+  Lookup per repo owner: tokens[owner] → GITHUB_TOKEN_<OWNER> → github_token
   PAGER                      Custom pager binary (default: less)
 `)
 }
@@ -576,6 +630,14 @@ func mergeConfig(dst *Config, src Config) {
 	}
 	if src.Owner != "" {
 		dst.Owner = src.Owner
+	}
+	if len(src.Tokens) > 0 {
+		if dst.Tokens == nil {
+			dst.Tokens = make(map[string]string, len(src.Tokens))
+		}
+		for k, v := range src.Tokens {
+			dst.Tokens[k] = v
+		}
 	}
 }
 
@@ -987,7 +1049,7 @@ func showInPager(content string) {
 
 func showReadme(ctx context.Context, user, repo string, cfg Config, fullOutput bool) {
 	fmt.Println("\n" + color("#FF6B6B", "═══ README ═══"))
-	readme := fetchReadme(ctx, user, repo, cfg.Token)
+	readme := fetchReadme(ctx, user, repo, cfg.TokenFor(user))
 
 	if readme == nil {
 		fmt.Println("   " + color("#FFE66D", "⚠ No README found in this repository"))
@@ -1096,7 +1158,7 @@ func showWorkflows(ctx context.Context, user, repo string, cfg Config) {
 	)
 
 	var runsResp WorkflowRunsResponse
-	status, err := getJSON(ctx, url, cfg.Token, &runsResp)
+	status, err := getJSON(ctx, url, cfg.TokenFor(user), &runsResp)
 	if err != nil {
 		var httpErr HTTPError
 		if isHTTPError(err, &httpErr) {
@@ -1364,7 +1426,7 @@ func printRemoteInfo(rows []Row, cfg Config, args Args) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	data := fetchAll(ctx, r.User, r.Repo, cfg.Token, args.NoCache)
+	data := fetchAll(ctx, r.User, r.Repo, cfg.TokenFor(r.User), args.NoCache)
 	printGitHubData(ctx, r.User, r.Repo, data, cfg, args)
 }
 
@@ -1508,6 +1570,13 @@ func main() {
 		if args.Subcommand == "show" {
 			display := cfg
 			display.Token = maskToken(display.Token)
+			if len(display.Tokens) > 0 {
+				masked := make(map[string]string, len(display.Tokens))
+				for k, v := range display.Tokens {
+					masked[k] = maskToken(v)
+				}
+				display.Tokens = masked
+			}
 			pretty, err := json.MarshalIndent(display, "", "  ")
 			if err != nil {
 				fmt.Println(color("#FF5555", "❌ Error formatting configuration:"), err)
@@ -1515,8 +1584,8 @@ func main() {
 			}
 			fmt.Println(color("#FFAAFF", "📝 Active Configuration State:"))
 			fmt.Println(string(pretty))
-			if cfg.Token != "" {
-				fmt.Println(color("#888888", "   (github_token is masked in this output)"))
+			if cfg.Token != "" || len(cfg.Tokens) > 0 {
+				fmt.Println(color("#888888", "   (github_token / tokens are masked in this output)"))
 			}
 			return
 		}
@@ -1544,7 +1613,7 @@ func main() {
 			color(cfg.Repo, repo),
 		)
 
-		data := fetchAll(ctx, user, repo, cfg.Token, args.NoCache)
+		data := fetchAll(ctx, user, repo, cfg.TokenFor(user), args.NoCache)
 		printGitHubData(ctx, user, repo, data, cfg, args)
 		return
 	}

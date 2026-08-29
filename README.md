@@ -148,6 +148,10 @@ Place a `gitv.json` (or `git-remote-color.json`) in one of the auto-detected loc
   "workflow_color": "#C3E88D",
   "github_token": "",
   "owner": "yourname",
+  "tokens": {
+    "yourname": "ghp_xxx_personal_account_token",
+    "your-org": "ghp_yyy_org_or_second_account_token"
+  },
   "glamour_style": "auto",
   "glamour_width": 100,
   "language_colors": [
@@ -163,6 +167,7 @@ Place a `gitv.json` (or `git-remote-color.json`) in one of the auto-detected loc
 |------------------|--------------------------------------------------|----------------|
 | `workflow_color` | Color for workflow names                         | `"#C3E88D"`    |
 | `owner`          | Default GitHub owner for bare repo name lookups  | `""`           |
+| `tokens`         | Per-owner GitHub tokens, `{ "owner": "token" }`  | `{}`           |
 
 Config lookup order:
 1. `$GIT_REMOTE_COLOR_CONFIG` env var
@@ -178,6 +183,32 @@ Set `github_token` in config, or export `GITHUB_TOKEN` in your shell.
 |-------------|----------------------|
 | Public repo  | Works without token   |
 | Private repo | Requires token        |
+
+### Multiple Accounts / Tokens
+
+If your remotes span more than one GitHub account or org (e.g. a personal
+account and a work org), a single `github_token` can't authenticate as both.
+Add a `tokens` map keyed by owner (case-insensitive) — each remote is then
+authenticated with the token matching its own owner:
+
+```json
+"tokens": {
+  "cumulus13": "ghp_personal_token",
+  "licface": "ghp_other_account_token",
+  "my-work-org": "ghp_org_token"
+}
+```
+
+Resolution order per repo owner:
+1. `tokens[owner]` in config (case-insensitive)
+2. `GITHUB_TOKEN_<OWNER>` env var (e.g. `GITHUB_TOKEN_LICFACE`, non-alphanumeric
+   characters become `_`)
+3. `github_token` in config, or `GITHUB_TOKEN` env var (global fallback)
+
+This applies everywhere a token is used: repo metadata, README, and workflow
+status — so `licface/nettop2` and `cumulus13/nettop2` remotes in the same
+working copy each authenticate correctly even though they belong to different
+accounts.
 | Rate limit   | Token increases to 5000 req/hr |
 
 ---

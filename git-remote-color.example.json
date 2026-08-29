@@ -13,6 +13,11 @@
   "last_update": "#FFFF00",
   "readme_color": "#95E1D3",
   "github_token": "",
+  "owner": "yourname",
+  "tokens": {
+    "yourname": "ghp_xxx_for_your_personal_account",
+    "your-org": "ghp_yyy_for_an_org_or_second_account"
+  },
   "glamour_style": "auto",
   "glamour_width": 100,
   "language_colors": [
